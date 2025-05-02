@@ -27,7 +27,7 @@ dev = [
 ]
 
 [project.urls]
-repository = "https://github.com/duckcomfy/duckcomfy_personal_nodes"
+Repository = "https://github.com/duckcomfy/duckcomfy_personal_nodes"
 bugs = "https://github.com/duckcomfy/duckcomfy_personal_nodes/issues"
 homepage = "https://github.com/duckcomfy/duckcomfy_personal_nodes"
 
