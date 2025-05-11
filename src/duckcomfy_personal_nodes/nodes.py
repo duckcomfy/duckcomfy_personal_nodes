@@ -684,6 +684,27 @@ class isMaskEmpty:
             return (True,)
         return (False,)
 
+class ImageReroute:
+  def __init__(self):
+    pass
+
+  @classmethod
+  def INPUT_TYPES(cls):
+    return {
+      "required": {
+        "image": ("IMAGE",),
+      }
+    }
+
+  RETURN_TYPES = ("IMAGE", )
+  RETURN_NAMES = ("IMAGE", )
+  FUNCTION = "doit"
+
+  CATEGORY = "duckcomfy"
+
+  def doit(self, image):
+      return (image,)
+
 
 NODE_CLASS_MAPPINGS = {
     "CastEfficiencySchedulerToDetailer": CastEfficiencySchedulerToDetailer,
@@ -720,6 +741,7 @@ NODE_CLASS_MAPPINGS = {
     "Duck_Text_to_Conditioning": WAS_Text_to_Conditioning,
     "CR_UpscaleImage": CR_UpscaleImage,
     "isMaskEmpty": isMaskEmpty,
+    "ImageReroute": ImageReroute,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -757,4 +779,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "Duck_Text_Concatenate": "Duck Text Concatenate",
     "Duck_Text_to_Conditioning": "Duck Text to Conditioning",
     "DuckTextMultiline": "Duck Text Multiline",
+    "ImageReroute": "Image Reroute",
 }
