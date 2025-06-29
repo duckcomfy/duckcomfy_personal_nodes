@@ -18,7 +18,7 @@ import torch
 EFFICIENCY_ONLY_SCHEDULERS = ["AYS SD1", "AYS SDXL", "AYS SVD", "GITS"]
 VANILLA_SCHEDULERS = comfy.samplers.KSampler.SCHEDULERS
 EFFICIENCY_SCHEDULERS = VANILLA_SCHEDULERS + EFFICIENCY_ONLY_SCHEDULERS
-DETAILER_SCHEDULERS = ['normal', 'karras', 'exponential', 'sgm_uniform', 'simple', 'ddim_uniform', 'beta', 'linear_quadratic', 'kl_optimal', 'AYS SDXL', 'AYS SD1', 'AYS SVD', 'GITS[coeff=1.2]', 'LTXV[default]', 'OSS FLUX', 'OSS Wan']
+DETAILER_SCHEDULERS = ['simple', 'sgm_uniform', 'karras', 'exponential', 'ddim_uniform', 'beta', 'normal', 'linear_quadratic', 'kl_optimal', 'AYS SDXL', 'AYS SD1', 'AYS SVD', 'GITS[coeff=1.2]', 'LTXV[default]', 'OSS FLUX', 'OSS Wan']
 
 class CastEfficiencySchedulerToDetailer:
     @classmethod
@@ -323,6 +323,26 @@ class ConditioningFallback:
     def execute(self, primary=None, fallback=None):
         return (fallback if primary is None else primary,)
 
+class ImageFallback:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+            },
+            "optional": {
+                "primary": ("IMAGE",),
+                "fallback": ("IMAGE",)
+            }
+        }
+
+    RETURN_TYPES = ("IMAGE",)
+    RETURN_NAMES = ("image",)
+    FUNCTION = "execute"
+    CATEGORY = "duckcomfy"
+
+    def execute(self, primary=None, fallback=None):
+        return (fallback if primary is None else primary,)
+
 class ModelFallback:
     @classmethod
     def INPUT_TYPES(s):
@@ -527,6 +547,37 @@ class SDXL_Resolutions:
             width = 640
             height = 1536
 
+        return(int(width),int(height))
+
+class Wan480_Resolutions:
+    resolution = ["square - 512x512","landscape - 832x480 (16:9)","portrait - 480x832 (9:16)"]
+    def __init__(self):
+        pass
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "resolution": (s.resolution,),
+            }
+        }
+    RETURN_TYPES = ("INT","INT",)
+    RETURN_NAMES = ("width", "height")
+    FUNCTION = "get_resolutions"
+    CATEGORY="duckcomfy"
+    def get_resolutions(self,resolution):
+        width = 512
+        height = 512
+        width = int(width)
+        height = int(height)
+        if(resolution == "square - 512x512"):
+            width = 512
+            height = 512
+        if(resolution == "landscape - 832x480 (16:9)"):
+            width = 832
+            height = 480
+        if(resolution == "portrait - 480x832 (9:16)"):
+            width = 480
+            height = 832
         return(int(width),int(height))
 
 class WAS_Text_Concatenate:
@@ -742,6 +793,8 @@ NODE_CLASS_MAPPINGS = {
     "CR_UpscaleImage": CR_UpscaleImage,
     "isMaskEmpty": isMaskEmpty,
     "ImageReroute": ImageReroute,
+    "Wan480_Resolutions": Wan480_Resolutions,
+    "ImageFallback": ImageFallback,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -780,4 +833,6 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "Duck_Text_to_Conditioning": "Duck Text to Conditioning",
     "DuckTextMultiline": "Duck Text Multiline",
     "ImageReroute": "Image Reroute",
+    "Wan480_Resolutions": "Wan480 Resolutions",
+    "ImageFallback": "Image Fallback",
 }

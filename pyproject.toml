@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "duckcomfy_personal_nodes"
-version = "5.0.0"
+version = "6.0.0"
 description = "Miscellaneous utility nodes"
 authors = [
   {name = "duckcomfy", email = "juan.hernandez.1974@proton.me"}
