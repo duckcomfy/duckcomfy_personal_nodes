@@ -4,21 +4,24 @@ from .attention_couple import (
     AttentionCoupleRegion,
     AttentionCoupleRegions,
 )
-import time
 import comfy.model_management
-import re
-import socket
 import nodes
 import folder_paths
 from .functions_upscale import *
 import torch
+from server import PromptServer
+import json
+from .query_tokenized_chunks import (get_clip_l_token_info, get_special_tokens_map)
+from server import PromptServer
+from aiohttp import web
 
+routes = PromptServer.instance.routes
 
 # compatibility with efficiency-nodes
 EFFICIENCY_ONLY_SCHEDULERS = ["AYS SD1", "AYS SDXL", "AYS SVD", "GITS"]
 VANILLA_SCHEDULERS = comfy.samplers.KSampler.SCHEDULERS
 EFFICIENCY_SCHEDULERS = VANILLA_SCHEDULERS + EFFICIENCY_ONLY_SCHEDULERS
-DETAILER_SCHEDULERS = ['simple', 'sgm_uniform', 'karras', 'exponential', 'ddim_uniform', 'beta', 'normal', 'linear_quadratic', 'kl_optimal', 'AYS SDXL', 'AYS SD1', 'AYS SVD', 'GITS[coeff=1.2]', 'LTXV[default]', 'OSS FLUX', 'OSS Wan']
+DETAILER_SCHEDULERS = ['simple', 'sgm_uniform', 'karras', 'exponential', 'ddim_uniform', 'beta', 'normal', 'linear_quadratic', 'kl_optimal', 'ays', 'ays+', 'ays_30', 'ays_30+', 'gits', 'beta_1_1', 'AYS SDXL', 'AYS SD1', 'AYS SVD', 'GITS[coeff=1.2]', 'LTXV[default]', 'OSS FLUX', 'OSS Wan']
 
 class CastEfficiencySchedulerToDetailer:
     @classmethod
@@ -756,6 +759,110 @@ class ImageReroute:
   def doit(self, image):
       return (image,)
 
+class ClipChunkManager:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "text": ("STRING", {"multiline": True, "dynamicPrompts": True, "tooltip": "The text to be encoded."}),
+                "clip": ("CLIP", {"tooltip": "The CLIP model used for encoding the text."})
+            }
+        }
+    RETURN_TYPES = ("CONDITIONING",)
+    OUTPUT_TOOLTIPS = ("A conditioning containing the embedded text used to guide the diffusion model towards generating specific images.",)
+    FUNCTION = "doit"
+
+    CATEGORY = "duckcomfy"
+    DESCRIPTION = "Encodes a text prompt using a CLIP model into an embedding that can be used to guide the diffusion model towards generating specific images."
+
+    def doit(self, clip, text):
+        if clip is None:
+            raise RuntimeError("ERROR: clip input is invalid: None\n\nIf the clip is from a checkpoint loader node your checkpoint does not contain a valid clip or text encoder model.")
+        prompts = []
+        for part in text.split(" BREAK "):
+            for chunk in part.split("BREAK"):
+                prompts.append(chunk)
+        prompt_tokens = [clip.tokenize(p) for p in prompts]
+        conditionings = [clip.encode_from_tokens_scheduled(toks) for toks in prompt_tokens]
+        concated_conditionings = concat_conditionings(conditionings)
+        return (concated_conditionings, )
+
+@routes.post('/query_tokenized_chunks')
+async def query_tokenized_chunks_route(request):
+    import time
+    start_time = time.time()
+    data = await request.json()
+    text = data.get('text', '')
+    checkpoint_name = data.get('checkpoint_name')
+    if not checkpoint_name:
+        return web.json_response({"error": "No checkpoint connected"}, status=400)
+    try:
+        # Load ONLY the CLIP model from the checkpoint (not VAE or SDXL model)
+        clip_load_start = time.time()
+        ckpt_path = folder_paths.get_full_path_or_raise("checkpoints", checkpoint_name)
+        out = comfy.sd.load_checkpoint_guess_config(ckpt_path, output_vae=False, output_clip=True, output_model=False)
+        _, clip, _, _ = out
+        clip_load_time = time.time() - clip_load_start
+
+        if clip is None:
+            return web.json_response({"error": "No CLIP model found in checkpoint"}, status=400)
+
+        # Log CLIP model memory usage
+        clip_memory_mb = 0
+        clip_device = "unknown"
+        if hasattr(clip, 'patcher') and hasattr(clip.patcher, 'model'):
+            model = clip.patcher.model
+            if hasattr(model, 'parameters'):
+                # Calculate memory usage in MB
+                total_params = sum(p.numel() * p.element_size() for p in model.parameters())
+                clip_memory_mb = total_params / (1024 * 1024)
+                # Get device info
+                for param in model.parameters():
+                    clip_device = str(param.device)
+                    break
+
+        # Debug: Test tokenization directly
+        test_tokens = clip.tokenize(text)
+
+        # Get text with BREAK markers at chunk boundaries
+        text_with_breaks = get_clip_l_token_info(clip, text)
+
+        total_time = time.time() - start_time
+        print(f"CLIP model loaded: {clip_memory_mb:.2f} MB on {clip_device}")
+        print(f"Route timing: {total_time:.3f}s total, {clip_load_time:.3f}s CLIP loading ({clip_load_time/total_time*100:.1f}%)")
+
+        # Prepare response data
+        response_data = {
+            "prompt": text,
+            "prompt_with_breaks": text_with_breaks,
+        }
+
+        return web.json_response(response_data)
+
+    except Exception as e:
+        total_time = time.time() - start_time
+        print(f"Route error after {total_time:.3f}s: {str(e)}")
+        return web.json_response({"error": str(e)}, status=500)
+
+def concat_conditionings(conditionings):
+    if not conditionings:
+        raise ValueError("Empty conditioning list.")
+    conditioning_to = conditionings[0]
+    for conditioning_from in conditionings[1:]:
+        out = []
+        if len(conditioning_from) > 1:
+            print("Warning: One of the conditionings contains more than 1 cond, only the first one will actually be applied.")
+
+        cond_from = conditioning_from[0][0]  # the tensor to concat
+
+        for i in range(len(conditioning_to)):
+            t1 = conditioning_to[i][0]  # the target tensor
+            tw = torch.cat((t1, cond_from), dim=1)
+            n = [tw, conditioning_to[i][1].copy()]  # preserve metadata
+            out.append(n)
+        conditioning_to = out
+    return conditioning_to
+
 
 NODE_CLASS_MAPPINGS = {
     "CastEfficiencySchedulerToDetailer": CastEfficiencySchedulerToDetailer,
@@ -789,6 +896,7 @@ NODE_CLASS_MAPPINGS = {
     "ImageReroute": ImageReroute,
     "Wan480_Resolutions": Wan480_Resolutions,
     "ImageFallback": ImageFallback,
+    "ClipChunkManager": ClipChunkManager,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -823,4 +931,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "ImageReroute": "Image Reroute",
     "Wan480_Resolutions": "Wan480 Resolutions",
     "ImageFallback": "Image Fallback",
+    "ClipChunkManager": "Clip Chunk Manager",
 }
